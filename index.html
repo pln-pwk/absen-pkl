@@ -170,7 +170,8 @@ const dataWajah = [
 {nama:"Zihan", file:"zihan.jpeg"},
 {nama:"Syifa", file:"syifa.jpeg"},
 {nama:"Rizki", file:"rizki.jpeg"},
-{nama:"Muhammad Parman", file:"muhammad parman.jpeg"}
+{nama:"Muhammad Parman", file:"muhammad parman.jpeg"},
+{nama:"Mecca Ras Mohammad", file:"mecca ras mohammad.jpeg"}
 ]
 
 const descriptors = []
@@ -198,6 +199,17 @@ orang.nama,
 }
 
 return descriptors
+}
+/* =========================
+   DATA DIVISI
+========================= */
+
+const dataDivisi = {
+"Zihan":"Transaksi Energi",
+"Syifa":"Transaksi Energi",
+"Rizki":"Transaksi Energi",
+"Muhammad Parman":"Transaksi Energi",
+"Mecca Ras Mohammad":"Teknik"
 }
 
 
@@ -249,7 +261,7 @@ let jam = now.toLocaleTimeString("id-ID")
 let tanggalKey = now.toISOString().slice(0,10)
 
 let nama = result.label
-let divisi="Transaksi Energi"
+let divisi = dataDivisi[nama] || "Tidak diketahui"
 
 
 
