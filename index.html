@@ -166,13 +166,18 @@ await faceapi.nets.faceRecognitionNet.loadFromUri('models')
 
 async function loadFaces(){
 
-const labels = ["Zihan","Syifa"]
+const dataWajah = [
+{nama:"Zihan", file:"zihan.jpeg"},
+{nama:"Syifa", file:"syifa.jpeg"},
+{nama:"Rizki", file:"rizki.jpeg"},
+{nama:"Muhammad Parman", file:"muhammad parman.jpeg"}
+]
 
 const descriptors = []
 
-for (const label of labels){
+for (const orang of dataWajah){
 
-const img = await faceapi.fetchImage(label.toLowerCase()+".jpeg")
+const img = await faceapi.fetchImage(orang.file)
 
 const detection = await faceapi
 .detectSingleFace(img,new faceapi.TinyFaceDetectorOptions())
@@ -180,12 +185,12 @@ const detection = await faceapi
 .withFaceDescriptor()
 
 if(!detection){
-throw new Error("Wajah tidak terdeteksi pada "+label)
+throw new Error("Wajah tidak terdeteksi pada "+orang.nama)
 }
 
 descriptors.push(
 new faceapi.LabeledFaceDescriptors(
-label,
+orang.nama,
 [detection.descriptor]
 )
 )
@@ -193,9 +198,7 @@ label,
 }
 
 return descriptors
-
 }
-
 
 
 /* =========================
@@ -224,9 +227,16 @@ const detections = await faceapi
 
 if(!detections.length) return
 
-const result = faceMatcher.findBestMatch(detections[0].descriptor)
+for(const detection of detections){
 
-if(result.label !== "unknown"){
+const result = faceMatcher.findBestMatch(detection.descriptor)
+
+if(result.label === "unknown"){
+
+status.innerText="❌ Wajah tidak dikenali"
+continue
+
+}
 
 scanning = true
 clearInterval(scanInterval)
@@ -370,7 +380,6 @@ scanFace()
 }
 
 
-
 /* =========================
    START SISTEM
 ========================= */
@@ -385,7 +394,7 @@ await startCamera()
 
 const labeledFaceDescriptors = await loadFaces()
 
-faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors,0.5)
+faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors,0.4)
 
 status.innerText="Sistem siap. Hadapkan wajah ke kamera"
 
