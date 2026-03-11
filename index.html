@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Absensi Wajah PKL PLN</title>
+
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+<style>
+
+body{
+font-family:Arial;
+background:linear-gradient(135deg,#125d72,#14a2ba);
+text-align:center;
+color:white;
+margin:0;
+padding:30px;
+}
+
+.container{
+background:white;
+color:#125d72;
+width:520px;
+margin:auto;
+padding:25px;
+border-radius:12px;
+box-shadow:0 10px 25px rgba(0,0,0,0.2);
+}
+
+video{
+width:100%;
+border-radius:10px;
+}
+
+#status{
+margin-top:15px;
+font-weight:bold;
+}
+
+#hasil{
+display:none;
+font-size:22px;
+margin-top:20px;
+}
+
+#error{
+color:red;
+margin-top:10px;
+}
+
+</style>
+</head>
+
+<body>
+
+<h2>ABSENSI PKL PLN</h2>
+
+<div class="container">
+
+<div id="loginBox">
+
+<h3>Masukkan PIN</h3>
+
+<input type="password" id="pinInput" placeholder="Masukkan PIN" style="padding:10px;font-size:18px;width:200px">
+
+<br><br>
+
+<button onclick="cekPin()" style="padding:10px 20px;font-size:18px;background:#125d72;color:white;border:none;border-radius:6px;">
+Login
+</button>
+
+<p id="loginError" style="color:red;"></p>
+
+</div>
+
+<video id="video" autoplay muted playsinline style="display:none"></video>
+
+<p id="status"></p>
+
+<p id="error"></p>
+
+<div id="hasil"></div>
+
+<script>
+
+// FIREBASE CONFIG
+const firebaseConfig = {
+  apiKey: "AIzaSyDz2YpwTmbP-44WKNVIE79CuxHDlIvZOlI",
+  authDomain: "absen-pkl-695be.firebaseapp.com",
+  databaseURL: "https://absen-pkl-695be-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "absen-pkl-695be",
+  storageBucket: "absen-pkl-695be.firebasestorage.app",
+  messagingSenderId: "806159771008",
+  appId: "1:806159771008:web:890e6010ae846823410d65"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let sudahKirim = false
+
+window.addEventListener("load", ()=>{
+status.innerText="Masukkan PIN untuk memulai"
+})
+
+const video = document.getElementById("video")
+const status = document.getElementById("status")
+const hasil = document.getElementById("hasil")
+const errorBox = document.getElementById("error")
+
+let faceMatcher
+let scanning=false
+let streamCamera=null
+let scanInterval=null
+
+let dataAbsen = JSON.parse(localStorage.getItem("absensiHarian")) || {}
+
+
+
+/* =========================
+   KIRIM KE GOOGLE SHEET
+========================= */
+
+async function kirimKeSpreadsheet(nama,divisi,tanggal,jam,statusAbsensi){
+
+const url="https://script.google.com/macros/s/AKfycbzob9SoaQvCtiYucxY85GfaOnFJS3xCzJvakyldLo2hE22-UOkk9tZ0-07QYZqpfn3z/exec"
+
+const formData = new FormData()
+
+formData.append("nama", nama)
+formData.append("divisi", divisi)
+formData.append("tanggal", tanggal)
+formData.append("jam", jam)
+formData.append("status", statusAbsensi)
+
+await fetch(url,{
+method:"POST",
+body:formData
+})
+
+}
+
+
+
+/* =========================
+   CAMERA
+========================= */
+
+async function startCamera(){
+
+streamCamera = await navigator.mediaDevices.getUserMedia({
+video:{width:640,height:480,facingMode:"user"}
+})
+
+video.srcObject = streamCamera
+
+return new Promise(resolve=>{
+video.onloadedmetadata=()=>{
+video.play()
+resolve()
+}
+})
+
+}
+
+function stopCamera(){
+
+if(streamCamera){
+streamCamera.getTracks().forEach(track=>track.stop())
+video.srcObject=null
+}
+
+}
+
+
+
+/* =========================
+   LOAD MODEL
+========================= */
+
+async function loadModels(){
+
+status.innerText="Memuat AI..."
+
+await faceapi.nets.tinyFaceDetector.loadFromUri('models')
+await faceapi.nets.faceLandmark68Net.loadFromUri('models')
+await faceapi.nets.faceRecognitionNet.loadFromUri('models')
+
+}
+
+
+
+/* =========================
+   LOAD WAJAH
+========================= */
+async function loadFaces(){
+
+const dataWajah = [
+{nama:"Zihan", file:"zihan.jpeg"},
+{nama:"Syifa", file:"syifa.jpeg"},
+{nama:"Rizki", file:"Rizki.jpeg"},
+{nama:"Muhammad Parman", file:"Parman.jpeg"},
+{nama:"Mecca Ras Mohammad", file:"Mecca.jpeg"}
+]
+
+const descriptors = []
+
+for (const orang of dataWajah){
+
+try{
+
+const img = await faceapi.fetchImage(orang.file)
+
+const detection = await faceapi
+.detectSingleFace(img,new faceapi.TinyFaceDetectorOptions())
+.withFaceLandmarks()
+.withFaceDescriptor()
+
+if(!detection){
+
+console.warn("Wajah tidak terdeteksi pada",orang.nama)
+continue
+
+}
+
+descriptors.push(
+new faceapi.LabeledFaceDescriptors(
+orang.nama,
+[detection.descriptor]
+)
+)
+
+}catch(err){
+
+console.warn("Gagal memuat gambar:",orang.file)
+
+}
+
+}
+
+if(descriptors.length===0){
+throw new Error("Tidak ada dataset wajah yang valid")
+}
+
+return descriptors
+
+}
+
+/* =========================
+   DATA DIVISI
+========================= */
+
+const dataDivisi = {
+"Zihan":"Transaksi Energi",
+"Syifa":"Transaksi Energi",
+"Rizki":"Transaksi Energi",
+"Muhammad Parman":"Transaksi Energi",
+"Mecca Ras Mohammad":"Teknik"
+}
+
+
+/* =========================
+   SCAN WAJAH
+========================= */
+
+function scanFace(){
+
+clearInterval(scanInterval)
+
+const options = new faceapi.TinyFaceDetectorOptions({
+inputSize:416,
+scoreThreshold:0.6
+})
+
+scanInterval = setInterval(async()=>{
+
+if(scanning) return
+if(!faceMatcher) return
+if(video.readyState !== 4) return
+
+const detections = await faceapi
+.detectAllFaces(video,options)
+.withFaceLandmarks()
+.withFaceDescriptors()
+
+if(!detections.length){
+status.innerText="Mencari wajah..."
+return
+}
+
+for(const detection of detections){
+
+const result = faceMatcher.findBestMatch(detection.descriptor)
+
+if(result.label === "unknown"){
+
+status.innerText="❌ Wajah tidak dikenali"
+continue
+
+}
+
+scanning = true
+clearInterval(scanInterval)
+
+await new Promise(resolve => setTimeout(resolve,2000))
+
+let now=new Date()
+
+let tanggal = now.toLocaleDateString("id-ID")
+let jam = now.toLocaleTimeString("id-ID")
+
+let tanggalKey = now.toISOString().slice(0,10)
+
+let nama = result.label
+let divisi = dataDivisi[nama] || "Tidak diketahui"
+
+
+
+/* =========================
+   CEK SUDAH ABSEN HARI INI
+========================= */
+
+if(!dataAbsen[tanggalKey]){
+dataAbsen[tanggalKey] = {}
+}
+
+if(dataAbsen[tanggalKey][nama]){
+
+hasil.style.display="block"
+
+hasil.innerHTML=`
+<div style="color:red;font-size:26px;">
+❌ ${nama}<br>
+Anda sudah absen hari ini
+</div>
+`
+
+status.innerText="Absensi ditolak"
+
+setTimeout(()=>{
+hasil.style.display="none"
+scanning=false
+scanFace()
+},5000)
+
+return
+}
+
+
+
+/* =========================
+   STATUS ABSEN
+========================= */
+
+let statusAbsensi="Tepat Waktu"
+
+if(now.getHours()>=8){
+statusAbsensi="Terlambat"
+}
+
+
+
+/* =========================
+   TAMPILKAN DATA
+========================= */
+
+hasil.style.display="block"
+
+hasil.innerHTML=`
+<div><b>${nama}</b></div>
+<div>Divisi : ${divisi}</div>
+<div>Tanggal : ${tanggal}</div>
+<div>Jam : ${jam}</div>
+<div style="color:green;font-size:24px;">${statusAbsensi}</div>
+`
+
+status.innerText="Mengirim absensi..."
+
+
+
+/* =========================
+   SIMPAN DATA HARIAN DULU
+========================= */
+
+dataAbsen[tanggalKey][nama] = true
+
+localStorage.setItem("absensiHarian", JSON.stringify(dataAbsen))
+
+
+
+/* =========================
+   BARU KIRIM KE SHEET
+========================= */
+if(sudahKirim) return
+sudahKirim = true
+
+await kirimKeSpreadsheet(nama,divisi,tanggal,jam,statusAbsensi)
+
+
+
+/* =========================
+   SUKSES
+========================= */
+
+setTimeout(()=>{
+
+stopCamera()
+
+hasil.innerHTML=`
+<div style="font-size:28px;color:green">
+✔ Absensi Berhasil
+</div>
+`
+
+status.innerText="Absensi berhasil"
+
+
+
+/* =========================
+   RESET SISTEM
+========================= */
+
+setTimeout(async ()=>{
+
+hasil.style.display="none"
+
+sudahKirim = false   // RESET PENTING
+
+await startCamera()
+
+status.innerText="Sistem siap. Hadapkan wajah ke kamera"
+
+scanning=false
+
+scanFace()
+
+},5000)
+
+},4000)
+
+}
+
+},1000)
+
+}
+
+
+/* =========================
+   START SISTEM
+========================= */
+
+async function start(){
+
+try{
+
+await loadModels()
+
+await startCamera()
+
+const labeledFaceDescriptors = await loadFaces()
+
+faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors,0.55)
+
+status.innerText="Sistem siap. Hadapkan wajah ke kamera"
+
+scanFace()
+
+}catch(err){
+
+status.innerText="❌ Sistem gagal dijalankan"
+errorBox.innerText=err.message
+
+}
+
+}
+
+async function cekPin(){
+
+let pinInput = document.getElementById("pinInput").value
+let loginError = document.getElementById("loginError")
+
+const snapshot = await db.ref("pin").once("value")
+let pinFirebase = snapshot.val()
+
+if(pinInput == pinFirebase){
+
+document.getElementById("loginBox").style.display="none"
+document.getElementById("video").style.display="block"
+
+status.innerText="Memulai sistem..."
+
+start()
+
+}else{
+
+loginError.innerText="PIN salah"
+
+}
+
+}
+</script>
+
+</body>
+</html>
